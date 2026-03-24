@@ -1,7 +1,7 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { Request } from 'express';
+import { Request, Response, NextFunction } from 'express';
 
 const UPLOADS_DIR = path.join(__dirname, '../../uploads');
 
@@ -14,10 +14,8 @@ const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     cb(null, UPLOADS_DIR);
   },
-  filename: (_req, file, cb) => {
-    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    const ext = path.extname(file.originalname);
-    cb(null, `cv-${unique}${ext}`);
+  filename: (_req, _file, cb) => {
+    cb(null, `cv-${Date.now()}-${Math.round(Math.random() * 1e9)}.pdf`);
   },
 });
 
@@ -34,3 +32,20 @@ export const uploadCV = multer({
   fileFilter,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
+
+export function validatePDF(req: Request, res: Response, next: NextFunction) {
+  if (!req.file) return next();
+  const buf = Buffer.alloc(4);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(req.file.path, 'r');
+    fs.readSync(fd, buf, 0, 4, 0);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  if (buf.toString('ascii') !== '%PDF') {
+    fs.unlinkSync(req.file.path);
+    return res.status(400).json({ error: 'File is not a valid PDF' });
+  }
+  return next();
+}

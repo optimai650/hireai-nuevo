@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import { db } from '../db/client';
 import { authenticate } from '../middleware/auth';
-import { uploadCV } from '../middleware/upload';
+import { uploadCV, validatePDF } from '../middleware/upload';
 import { analyzeCV } from '../services/ai';
 
 const router = Router();
@@ -130,7 +130,7 @@ router.get('/export/csv', (req: Request, res: Response) => {
 });
 
 // POST /candidates
-router.post('/', uploadCV.single('cv'), async (req: Request, res: Response) => {
+router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: Response) => {
   if (!req.file) {
     return res.status(400).json({ error: 'CV file (PDF) is required' });
   }

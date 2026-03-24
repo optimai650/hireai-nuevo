@@ -72,6 +72,12 @@ router.post('/generate', authenticate, async (req: Request, res: Response) => {
 
     const questions = await generateInterviewQuestions(candidateInfo, positionInfo, type, numQuestions);
 
+    if (!questions || questions.length === 0) {
+      return res.status(503).json({
+        error: 'AI service unavailable. Could not generate interview questions. Please try again.',
+      });
+    }
+
     const interviewId = uuidv4();
     const publicToken = uuidv4();
     const now = new Date().toISOString();
