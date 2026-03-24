@@ -134,6 +134,15 @@ El servidor corre en `http://localhost:3001`. Las migraciones de SQLite se ejecu
 npm run seed
 ```
 
+### 👤 Usuarios de prueba (seed)
+
+| Rol | Email | Contraseña |
+|-----|-------|------------|
+| Admin | admin@acme.com | Admin1234! |
+| Recruiter | recruiter@acme.com | Recruiter1234! |
+
+> Empresa: **Acme Corp** — incluye 3 posiciones y 5 candidatos precargados.
+
 ### 2. Frontend
 
 ```bash
