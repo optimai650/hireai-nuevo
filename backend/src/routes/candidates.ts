@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
+import path from 'path';
 import { db } from '../db/client';
 import { authenticate } from '../middleware/auth';
 import { uploadCV, validatePDF } from '../middleware/upload';
@@ -77,7 +78,12 @@ router.get('/', (req: Request, res: Response) => {
 
   const data = db
     .prepare(
-      `SELECT c.*, p.title as position_title
+      `SELECT c.id, c.company_id, c.position_id, c.name, c.email, c.phone, c.location,
+              c.cv_filename, c.status, c.overall_score, c.experience_score, c.skills_score,
+              c.education_score, c.cultural_fit_score, c.years_experience,
+              c.ai_summary, c.ai_strengths, c.ai_concerns, c.extracted_skills,
+              c.extracted_experience, c.extracted_education, c.notes,
+              c.created_at, c.updated_at, p.title as position_title
        FROM candidates c
        LEFT JOIN positions p ON c.position_id = p.id
        WHERE ${where}
@@ -104,7 +110,12 @@ router.get('/export/csv', (req: Request, res: Response) => {
 
   const rows = db
     .prepare(
-      `SELECT c.*, p.title as position_title
+      `SELECT c.id, c.company_id, c.position_id, c.name, c.email, c.phone, c.location,
+              c.cv_filename, c.status, c.overall_score, c.experience_score, c.skills_score,
+              c.education_score, c.cultural_fit_score, c.years_experience,
+              c.ai_summary, c.ai_strengths, c.ai_concerns, c.extracted_skills,
+              c.extracted_experience, c.extracted_education, c.notes,
+              c.created_at, c.updated_at, p.title as position_title
        FROM candidates c
        LEFT JOIN positions p ON c.position_id = p.id
        WHERE ${where}
@@ -230,7 +241,13 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
       now
     );
 
-    const candidate = db.prepare('SELECT * FROM candidates WHERE id = ?').get(candidateId);
+    const candidate = db.prepare(`
+      SELECT id, company_id, position_id, name, email, phone, location, cv_filename, status,
+             overall_score, experience_score, skills_score, education_score, cultural_fit_score,
+             years_experience, ai_summary, ai_strengths, ai_concerns, extracted_skills,
+             extracted_experience, extracted_education, notes, created_at, updated_at
+      FROM candidates WHERE id = ?
+    `).get(candidateId);
     return res.status(201).json(candidate);
   } catch (err) {
     console.error('Create candidate error:', err);
@@ -241,11 +258,28 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
   }
 });
 
+// GET /candidates/:id/cv — must be BEFORE /:id
+router.get('/:id/cv', (req: Request, res: Response) => {
+  const candidate = db
+    .prepare('SELECT cv_path, cv_filename FROM candidates WHERE id = ? AND company_id = ?')
+    .get(req.params.id, req.user!.companyId) as { cv_path: string | null; cv_filename: string | null } | undefined;
+  if (!candidate || !candidate.cv_path) return res.status(404).json({ error: 'CV not found' });
+  if (!fs.existsSync(candidate.cv_path)) return res.status(404).json({ error: 'CV file not found on disk' });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${candidate.cv_filename || 'cv.pdf'}"`);
+  return res.sendFile(path.resolve(candidate.cv_path));
+});
+
 // GET /candidates/:id
 router.get('/:id', (req: Request, res: Response) => {
   const candidate = db
     .prepare(`
-      SELECT c.*, p.title as position_title
+      SELECT c.id, c.company_id, c.position_id, c.name, c.email, c.phone, c.location,
+             c.cv_filename, c.status, c.overall_score, c.experience_score, c.skills_score,
+             c.education_score, c.cultural_fit_score, c.years_experience,
+             c.ai_summary, c.ai_strengths, c.ai_concerns, c.extracted_skills,
+             c.extracted_experience, c.extracted_education, c.notes,
+             c.created_at, c.updated_at, p.title as position_title
       FROM candidates c
       LEFT JOIN positions p ON c.position_id = p.id
       WHERE c.id = ? AND c.company_id = ?
@@ -302,7 +336,13 @@ router.patch('/:id', (req: Request, res: Response) => {
 
   db.prepare(`UPDATE candidates SET ${updates.join(', ')} WHERE id = ?`).run(...values);
 
-  const candidate = db.prepare('SELECT * FROM candidates WHERE id = ?').get(req.params.id);
+  const candidate = db.prepare(`
+    SELECT id, company_id, position_id, name, email, phone, location, cv_filename, status,
+           overall_score, experience_score, skills_score, education_score, cultural_fit_score,
+           years_experience, ai_summary, ai_strengths, ai_concerns, extracted_skills,
+           extracted_experience, extracted_education, notes, created_at, updated_at
+    FROM candidates WHERE id = ?
+  `).get(req.params.id);
   return res.json(candidate);
 });
 

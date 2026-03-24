@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
+import rateLimit from 'express-rate-limit';
 import { db } from '../db/client';
 import { authenticate, requireRole } from '../middleware/auth';
 import { generateInterviewQuestions, evaluateResponse, evaluateInterview } from '../services/ai';
@@ -158,8 +159,16 @@ router.get('/public/:token', (req: Request, res: Response) => {
   return res.json({ ...interview, questions });
 });
 
+const respondLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // POST /interviews/:id/respond — no auth, uses public_token
-router.post('/:id/respond', async (req: Request, res: Response) => {
+router.post('/:id/respond', respondLimiter, async (req: Request, res: Response) => {
   const parsed = respondSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Validation failed', details: parsed.error.flatten() });
