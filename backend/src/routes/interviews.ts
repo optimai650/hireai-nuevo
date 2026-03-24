@@ -16,7 +16,7 @@ const generateSchema = z.object({
 
 const respondSchema = z.object({
   token: z.string().min(1),
-  responses: z.record(z.string(), z.string()),
+  responses: z.record(z.string(), z.string().max(5000)),
 });
 
 // GET /interviews — requires auth
@@ -49,7 +49,7 @@ router.post('/generate', authenticate, async (req: Request, res: Response) => {
 
   try {
     const candidate = db
-      .prepare('SELECT * FROM candidates WHERE id = ? AND company_id = ?')
+      .prepare('SELECT id, name, years_experience, extracted_skills, extracted_experience, extracted_education, ai_summary, position_id FROM candidates WHERE id = ? AND company_id = ?')
       .get(candidateId, req.user!.companyId) as Record<string, unknown> | undefined;
 
     if (!candidate) return res.status(404).json({ error: 'Candidate not found' });

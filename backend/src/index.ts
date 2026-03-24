@@ -6,7 +6,7 @@ import path from 'path';
 import { runMigrations } from './db/migrations/001_initial';
 
 // Validate required env vars
-const required = ['JWT_SECRET'];
+const required = ['JWT_SECRET', 'OPENROUTER_API_KEY'];
 for (const key of required) {
   if (!process.env[key]) throw new Error(`Missing required env var: ${key}`);
 }

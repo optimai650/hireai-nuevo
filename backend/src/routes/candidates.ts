@@ -150,11 +150,12 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
 
   try {
     // Validate positionId if provided
+    let validatedPosition: { id: string; title: string; requirements: string | null } | undefined;
     if (positionId) {
-      const pos = db
+      validatedPosition = db
         .prepare('SELECT id, title, requirements FROM positions WHERE id = ? AND company_id = ?')
         .get(positionId, req.user!.companyId) as { id: string; title: string; requirements: string | null } | undefined;
-      if (!pos) {
+      if (!validatedPosition) {
         fs.unlinkSync(req.file.path);
         return res.status(404).json({ error: 'Position not found' });
       }
@@ -187,16 +188,9 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
       cvText = 'Could not extract text from PDF';
     }
 
-    // Get position info for AI analysis
-    let positionTitle: string | undefined;
-    let positionRequirements: string | undefined;
-    if (positionId) {
-      const pos = db
-        .prepare('SELECT title, requirements FROM positions WHERE id = ?')
-        .get(positionId) as { title: string; requirements: string | null } | undefined;
-      positionTitle = pos?.title;
-      positionRequirements = pos?.requirements || undefined;
-    }
+    // Get position info for AI analysis (reuse result from validation query above)
+    const positionTitle: string | undefined = validatedPosition?.title;
+    const positionRequirements: string | undefined = validatedPosition?.requirements || undefined;
 
     // Analyze CV with AI
     const analysis = await analyzeCV(cvText, positionTitle, positionRequirements);
@@ -266,7 +260,8 @@ router.get('/:id/cv', (req: Request, res: Response) => {
   if (!candidate || !candidate.cv_path) return res.status(404).json({ error: 'CV not found' });
   if (!fs.existsSync(candidate.cv_path)) return res.status(404).json({ error: 'CV file not found on disk' });
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${candidate.cv_filename || 'cv.pdf'}"`);
+  const safeName = (candidate.cv_filename || 'cv.pdf').replace(/[^\w.\-_ ]/g, '_');
+  res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
   return res.sendFile(path.resolve(candidate.cv_path));
 });
 
