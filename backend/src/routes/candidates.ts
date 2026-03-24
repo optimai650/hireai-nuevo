@@ -152,6 +152,10 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
 
   const { positionId, notes } = req.body as { positionId?: string; notes?: string };
 
+  if (notes && notes.length > 10000) {
+    return res.status(400).json({ error: 'Notes exceed maximum length of 10000 characters' });
+  }
+
   try {
     // Validate positionId if provided
     let validatedPosition: { id: string; title: string; requirements: string | null } | undefined;
@@ -293,7 +297,9 @@ router.get('/:id', (req: Request, res: Response) => {
 
   const interviews = db
     .prepare(`
-      SELECT i.*, COUNT(iq.id) as question_count
+      SELECT i.id, i.candidate_id, i.position_id, i.type, i.status,
+             i.expires_at, i.completed_at, i.score, i.ai_evaluation, i.created_at,
+             COUNT(iq.id) as question_count
       FROM interviews i
       LEFT JOIN interview_questions iq ON iq.interview_id = i.id
       WHERE i.candidate_id = ?
