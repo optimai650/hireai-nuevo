@@ -10,6 +10,8 @@ import { analyzeCV } from '../services/ai';
 
 const router = Router();
 
+const UPLOADS_DIR = path.resolve(__dirname, '../../uploads');
+
 // All routes require authentication
 router.use(authenticate);
 
@@ -22,7 +24,7 @@ const CANDIDATE_STATUSES = [
 
 const updateCandidateSchema = z.object({
   status: z.enum(CANDIDATE_STATUSES).optional(),
-  notes: z.string().optional(),
+  notes: z.string().max(10000).optional(),
 });
 
 // Sanitize a field value for CSV injection
@@ -48,12 +50,14 @@ function buildCandidateFilters(
     params.push(query.positionId);
   }
   if (query.minScore !== undefined) {
+    const min = Math.max(0, Math.min(100, parseFloat(query.minScore) || 0));
     conditions.push('c.overall_score >= ?');
-    params.push(Number(query.minScore));
+    params.push(min);
   }
   if (query.maxScore !== undefined) {
+    const max = Math.max(0, Math.min(100, parseFloat(query.maxScore) || 100));
     conditions.push('c.overall_score <= ?');
-    params.push(Number(query.maxScore));
+    params.push(max);
   }
   if (query.search) {
     conditions.push('(c.name LIKE ? OR c.email LIKE ?)');
@@ -262,7 +266,11 @@ router.get('/:id/cv', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'application/pdf');
   const safeName = (candidate.cv_filename || 'cv.pdf').replace(/[^\w.\-_ ]/g, '_');
   res.setHeader('Content-Disposition', `inline; filename="${safeName}"`);
-  return res.sendFile(path.resolve(candidate.cv_path));
+  const resolvedPath = path.resolve(candidate.cv_path);
+  if (!resolvedPath.startsWith(UPLOADS_DIR + path.sep) && resolvedPath !== UPLOADS_DIR) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  res.sendFile(resolvedPath);
 });
 
 // GET /candidates/:id

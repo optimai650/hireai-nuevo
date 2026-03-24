@@ -110,9 +110,9 @@ router.post('/generate', authenticate, async (req: Request, res: Response) => {
 
     createInterview();
 
-    const interview = db.prepare('SELECT * FROM interviews WHERE id = ?').get(interviewId);
+    const interview = db.prepare(`SELECT id, candidate_id, position_id, type, status, public_token, expires_at, score, ai_evaluation, created_at FROM interviews WHERE id = ?`).get(interviewId);
     const createdQuestions = db
-      .prepare('SELECT * FROM interview_questions WHERE interview_id = ? ORDER BY order_index')
+      .prepare(`SELECT id, interview_id, question, type, expected_keywords, order_index FROM interview_questions WHERE interview_id = ? ORDER BY order_index`)
       .all(interviewId);
 
     return res.status(201).json({ ...interview as object, questions: createdQuestions });
@@ -178,7 +178,7 @@ router.post('/:id/respond', respondLimiter, async (req: Request, res: Response) 
 
   try {
     const interview = db
-      .prepare('SELECT * FROM interviews WHERE id = ? AND public_token = ?')
+      .prepare('SELECT id, candidate_id, position_id, type, status, public_token, expires_at, score, ai_evaluation, created_at FROM interviews WHERE id = ? AND public_token = ?')
       .get(req.params.id, token) as Record<string, unknown> | undefined;
 
     if (!interview) return res.status(404).json({ error: 'Interview not found or invalid token' });
@@ -192,7 +192,7 @@ router.post('/:id/respond', respondLimiter, async (req: Request, res: Response) 
     }
 
     const questions = db
-      .prepare('SELECT * FROM interview_questions WHERE interview_id = ? ORDER BY order_index')
+      .prepare('SELECT id, interview_id, question, type, expected_keywords, order_index FROM interview_questions WHERE interview_id = ? ORDER BY order_index')
       .all(interview.id as string) as { id: string; question: string; expected_keywords: string }[];
 
     // Evaluate each response with AI
@@ -255,12 +255,12 @@ router.get('/:id', authenticate, (req: Request, res: Response) => {
   if (!interview) return res.status(404).json({ error: 'Interview not found' });
 
   const questions = db
-    .prepare('SELECT * FROM interview_questions WHERE interview_id = ? ORDER BY order_index')
+    .prepare('SELECT id, interview_id, question, type, expected_keywords, order_index FROM interview_questions WHERE interview_id = ? ORDER BY order_index')
     .all(req.params.id) as { id: string }[];
 
   const questionsWithResponses = questions.map(q => {
     const response = db
-      .prepare('SELECT * FROM interview_responses WHERE interview_id = ? AND question_id = ?')
+      .prepare('SELECT id, interview_id, question_id, response_text, response_score, ai_feedback, created_at FROM interview_responses WHERE interview_id = ? AND question_id = ?')
       .get(req.params.id, q.id);
     return { ...q, response: response || null };
   });
