@@ -45,6 +45,7 @@ export interface Interview {
   position_id: string | null
   type: string
   status: string
+  token: string | null
   expires_at: string | null
   completed_at: string | null
   score: number | null

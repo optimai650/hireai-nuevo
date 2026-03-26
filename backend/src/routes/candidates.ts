@@ -170,7 +170,7 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
     }
 
     // Extract text from PDF (basic approach: read buffer and extract printable text)
-    const buffer = fs.readFileSync(req.file.path);
+    const buffer = await fs.promises.readFile(req.file.path);
     let cvText = '';
     try {
       // Extract readable ASCII/UTF-8 text from PDF binary
@@ -298,6 +298,7 @@ router.get('/:id', (req: Request, res: Response) => {
   const interviews = db
     .prepare(`
       SELECT i.id, i.candidate_id, i.position_id, i.type, i.status,
+             i.token,
              i.expires_at, i.completed_at, i.score, i.ai_evaluation, i.created_at,
              COUNT(iq.id) as question_count
       FROM interviews i

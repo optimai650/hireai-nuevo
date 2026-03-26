@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -23,6 +23,7 @@ import ScoreBar from '../components/ui/ScoreBar'
 import Modal from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import axios from 'axios'
+import api from '../api/axios'
 
 const STATUSES: CandidateStatus[] = [
   'new', 'reviewing', 'shortlisted', 'interview_scheduled',
@@ -46,7 +47,20 @@ export default function CandidateDetailPage() {
   const [genType, setGenType] = useState<'general' | 'technical' | 'behavioral' | 'cultural'>('general')
   const [numQ, setNumQ] = useState(8)
   const [genError, setGenError] = useState('')
+  const [cvError, setCvError] = useState('')
   const [copiedToken, setCopiedToken] = useState('')
+  const [isLoadingCv, setIsLoadingCv] = useState(false)
+  const cvTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const urlRevokeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (cvTimeoutRef.current) clearTimeout(cvTimeoutRef.current)
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+      if (urlRevokeTimeoutRef.current) clearTimeout(urlRevokeTimeoutRef.current)
+    }
+  }, [])
 
   const { data: candidate, isLoading } = useQuery({
     queryKey: ['candidate', id],
@@ -94,11 +108,39 @@ export default function CandidateDetailPage() {
     setEditingNotes(false)
   }
 
-  const copyInterviewLink = (token: string, id: string) => {
+  const handleViewCv = async () => {
+    if (isLoadingCv) return
+    setIsLoadingCv(true)
+    const newWindow = window.open('', '_blank', 'noopener,noreferrer')
+    try {
+      const response = await api.get(`/candidates/${id}/cv`, { responseType: 'blob' })
+      const url = URL.createObjectURL(response.data)
+      if (newWindow) newWindow.location.href = url
+      else window.open(url, '_blank', 'noopener,noreferrer')
+      if (urlRevokeTimeoutRef.current) clearTimeout(urlRevokeTimeoutRef.current)
+      urlRevokeTimeoutRef.current = setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch {
+      newWindow?.close()
+      setCvError('No se pudo descargar el CV. Intenta de nuevo.')
+      if (cvTimeoutRef.current) clearTimeout(cvTimeoutRef.current)
+      cvTimeoutRef.current = setTimeout(() => setCvError(''), 4000)
+    } finally {
+      setIsLoadingCv(false)
+    }
+  }
+
+  const copyInterviewLink = async (token: string, interviewId: string) => {
     const url = `${window.location.origin}/interview/${token}`
-    navigator.clipboard.writeText(url)
-    setCopiedToken(id)
-    setTimeout(() => setCopiedToken(''), 2000)
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopiedToken(interviewId)
+      if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
+      copiedTimeoutRef.current = setTimeout(() => setCopiedToken(''), 2000)
+    } catch {
+      setCvError('No se pudo copiar el enlace al portapapeles.')
+      if (cvTimeoutRef.current) clearTimeout(cvTimeoutRef.current)
+      cvTimeoutRef.current = setTimeout(() => setCvError(''), 4000)
+    }
   }
 
   if (isLoading) {
@@ -134,6 +176,13 @@ export default function CandidateDetailPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* CV Error */}
+      {cvError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+          {cvError}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-4">
         <button onClick={() => navigate('/candidates')} className="btn-secondary px-2.5">
@@ -146,14 +195,13 @@ export default function CandidateDetailPage() {
           </p>
         </div>
         <div className="flex gap-3">
-          <a
-            href={candidatesApi.getCvUrl(id!)}
-            target="_blank"
-            rel="noopener"
+          <button
+            onClick={handleViewCv}
+            disabled={isLoadingCv}
             className="btn-secondary text-sm"
           >
-            <FileText size={16} /> Ver CV
-          </a>
+            {isLoadingCv ? <><Spinner size="sm" /> Cargando...</> : <><FileText size={16} /> Ver CV</>}
+          </button>
           <button
             onClick={() => { setShowGenerate(true); setGenError('') }}
             className="btn-primary text-sm"
@@ -352,9 +400,9 @@ export default function CandidateDetailPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {iv.status === 'pending' && (
+                      {iv.status === 'pending' && iv.token != null && (
                         <button
-                          onClick={() => copyInterviewLink('', iv.id)}
+                          onClick={() => copyInterviewLink(iv.token!, iv.id)}
                           className="p-1.5 hover:bg-base-200 rounded text-base-500"
                           title="Copiar enlace"
                         >
