@@ -182,7 +182,11 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
       cvText = '';
     }
 
-    if (!cvText || cvText.length < 50) {
+    // Check text quality: need at least 40% alphabetic chars to consider it readable
+    const alphaCount = (cvText.match(/[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/g) || []).length;
+    const isReadable = cvText.length >= 50 && alphaCount / cvText.length >= 0.4;
+
+    if (!isReadable) {
       // fallback: extraer texto ASCII printable del binario
       cvText = buffer.toString('latin1')
         .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
