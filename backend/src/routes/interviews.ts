@@ -24,6 +24,7 @@ router.get('/', authenticate, (req: Request, res: Response) => {
   const interviews = db
     .prepare(`
       SELECT i.id, i.company_id, i.candidate_id, i.position_id, i.type, i.status,
+             i.public_token as token,
              i.expires_at, i.completed_at, i.score, i.ai_evaluation, i.created_at,
              c.name as candidate_name, c.email as candidate_email,
              p.title as position_title
@@ -243,6 +244,7 @@ router.get('/:id', authenticate, (req: Request, res: Response) => {
   const interview = db
     .prepare(`
       SELECT i.id, i.company_id, i.candidate_id, i.position_id, i.type, i.status,
+             i.public_token as token,
              i.expires_at, i.completed_at, i.score, i.ai_evaluation, i.created_at,
              c.name as candidate_name, c.email as candidate_email,
              p.title as position_title

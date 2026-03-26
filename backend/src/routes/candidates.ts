@@ -3,6 +3,9 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
+import * as pdfParseModule from 'pdf-parse';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = (pdfParseModule as any).default ?? pdfParseModule;
 import { db } from '../db/client';
 import { authenticate } from '../middleware/auth';
 import { uploadCV, validatePDF } from '../middleware/upload';
@@ -169,31 +172,23 @@ router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: R
       }
     }
 
-    // Extract text from PDF (basic approach: read buffer and extract printable text)
+    // Extract text from PDF using pdf-parse
     const buffer = await fs.promises.readFile(req.file.path);
     let cvText = '';
     try {
-      // Extract readable ASCII/UTF-8 text from PDF binary
-      const raw = buffer.toString('latin1');
-      // Extract text between BT/ET markers (PDF text operators) or just grab printable chars
-      const matches = raw.match(/\(([^)]{1,500})\)/g) || [];
-      cvText = matches
-        .map(m => m.slice(1, -1))
-        .join(' ')
+      const pdfData = await pdfParse(buffer);
+      cvText = pdfData.text?.trim().slice(0, 10000) || '';
+    } catch {
+      cvText = '';
+    }
+
+    if (!cvText || cvText.length < 50) {
+      // fallback: extraer texto ASCII printable del binario
+      cvText = buffer.toString('latin1')
         .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
         .replace(/\s+/g, ' ')
-        .trim();
-
-      // Fallback: grab all printable characters if PDF text extraction yields too little
-      if (cvText.length < 100) {
-        cvText = raw
-          .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 10000);
-      }
-    } catch {
-      cvText = 'Could not extract text from PDF';
+        .trim()
+        .slice(0, 10000);
     }
 
     // Get position info for AI analysis (reuse result from validation query above)
@@ -298,7 +293,7 @@ router.get('/:id', (req: Request, res: Response) => {
   const interviews = db
     .prepare(`
       SELECT i.id, i.candidate_id, i.position_id, i.type, i.status,
-             i.token,
+             i.public_token as token,
              i.expires_at, i.completed_at, i.score, i.ai_evaluation, i.created_at,
              COUNT(iq.id) as question_count
       FROM interviews i
