@@ -147,7 +147,7 @@ function UploadModal({
             Cancelar
           </button>
           <button type="submit" disabled={uploading || !file} className="btn-primary flex-1 justify-center">
-            {uploading ? <><Spinner size="sm" /> Analizando CV...</> : <><Upload size={16} /> Subir y analizar</>}
+            {uploading ? <><Spinner size="sm" /> Subiendo...</> : <><Upload size={16} /> Subir CV</>}
           </button>
         </div>
       </form>

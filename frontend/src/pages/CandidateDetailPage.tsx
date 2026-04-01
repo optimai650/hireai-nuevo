@@ -64,6 +64,12 @@ export default function CandidateDetailPage() {
     }
   }, [])
 
+  const { data: candidate, isLoading } = useQuery({
+    queryKey: ['candidate', id],
+    queryFn: () => candidatesApi.get(id!).then(r => r.data),
+    enabled: !!id,
+  })
+
   useEffect(() => {
     if (candidate?.is_analyzing === 1) {
       analyzingRef.current = setInterval(() => {
@@ -77,12 +83,6 @@ export default function CandidateDetailPage() {
     }
     return () => { if (analyzingRef.current) clearInterval(analyzingRef.current) }
   }, [candidate?.is_analyzing, queryClient, id])
-
-  const { data: candidate, isLoading } = useQuery({
-    queryKey: ['candidate', id],
-    queryFn: () => candidatesApi.get(id!).then(r => r.data),
-    enabled: !!id,
-  })
 
   const updateMutation = useMutation({
     mutationFn: (data: { status?: CandidateStatus; notes?: string }) =>
