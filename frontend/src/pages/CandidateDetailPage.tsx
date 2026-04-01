@@ -53,14 +53,30 @@ export default function CandidateDetailPage() {
   const cvTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const copiedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const urlRevokeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const analyzingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     return () => {
       if (cvTimeoutRef.current) clearTimeout(cvTimeoutRef.current)
       if (copiedTimeoutRef.current) clearTimeout(copiedTimeoutRef.current)
       if (urlRevokeTimeoutRef.current) clearTimeout(urlRevokeTimeoutRef.current)
+      if (analyzingRef.current) clearInterval(analyzingRef.current)
     }
   }, [])
+
+  useEffect(() => {
+    if (candidate?.is_analyzing === 1) {
+      analyzingRef.current = setInterval(() => {
+        queryClient.invalidateQueries({ queryKey: ['candidate', id] })
+      }, 3000)
+    } else {
+      if (analyzingRef.current) {
+        clearInterval(analyzingRef.current)
+        analyzingRef.current = null
+      }
+    }
+    return () => { if (analyzingRef.current) clearInterval(analyzingRef.current) }
+  }, [candidate?.is_analyzing, queryClient, id])
 
   const { data: candidate, isLoading } = useQuery({
     queryKey: ['candidate', id],
@@ -176,6 +192,13 @@ export default function CandidateDetailPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* Analyzing banner */}
+      {candidate.is_analyzing === 1 && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-lg px-4 py-3 flex items-center gap-2">
+          <Spinner size="sm" /> Analizando CV... Los scores aparecerán en unos segundos.
+        </div>
+      )}
+
       {/* CV Error */}
       {cvError && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">

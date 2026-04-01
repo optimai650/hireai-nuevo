@@ -33,6 +33,7 @@ export interface Candidate {
   extracted_experience: string | null
   extracted_education: string | null
   notes: string | null
+  is_analyzing?: number
   created_at: string
   updated_at: string
   position_title?: string | null

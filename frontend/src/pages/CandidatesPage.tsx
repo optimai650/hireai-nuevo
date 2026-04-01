@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -168,6 +168,16 @@ export default function CandidatesPage() {
     queryFn: () => candidatesApi.list(filters).then(r => r.data),
   })
 
+  const hasAnalyzing = data?.data.some(c => c.is_analyzing === 1)
+
+  useEffect(() => {
+    if (!hasAnalyzing) return
+    const interval = setInterval(() => {
+      queryClient.invalidateQueries({ queryKey: ['candidates'] })
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [hasAnalyzing, queryClient])
+
   const { data: positions } = useQuery({
     queryKey: ['positions'],
     queryFn: () => positionsApi.list().then(r => r.data),
@@ -333,7 +343,13 @@ export default function CandidatesPage() {
                         {c.position_title || <span className="text-base-300">Sin posición</span>}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge status={c.status} />
+                        {c.is_analyzing === 1 ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                            <Spinner size="sm" /> Analizando...
+                          </span>
+                        ) : (
+                          <Badge status={c.status} />
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

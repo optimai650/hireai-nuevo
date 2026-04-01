@@ -3,9 +3,7 @@ import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 import path from 'path';
-import * as pdfParseModule from 'pdf-parse';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = (pdfParseModule as any).default ?? pdfParseModule;
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
 import { db } from '../db/client';
 import { authenticate } from '../middleware/auth';
 import { uploadCV, validatePDF } from '../middleware/upload';
@@ -89,7 +87,7 @@ router.get('/', (req: Request, res: Response) => {
               c.cv_filename, c.status, c.overall_score, c.experience_score, c.skills_score,
               c.education_score, c.cultural_fit_score, c.years_experience,
               c.ai_summary, c.ai_strengths, c.ai_concerns, c.extracted_skills,
-              c.extracted_experience, c.extracted_education, c.notes,
+              c.extracted_experience, c.extracted_education, c.notes, c.is_analyzing,
               c.created_at, c.updated_at, p.title as position_title
        FROM candidates c
        LEFT JOIN positions p ON c.position_id = p.id
@@ -149,115 +147,102 @@ router.get('/export/csv', (req: Request, res: Response) => {
 
 // POST /candidates
 router.post('/', uploadCV.single('cv'), validatePDF, async (req: Request, res: Response) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'CV file (PDF) is required' });
-  }
+  if (!req.file) return res.status(400).json({ error: 'CV file (PDF) is required' })
 
-  const { positionId, notes } = req.body as { positionId?: string; notes?: string };
+  const { positionId, notes } = req.body as { positionId?: string; notes?: string }
+  if (notes && notes.length > 10000) return res.status(400).json({ error: 'Notes exceed maximum length' })
 
-  if (notes && notes.length > 10000) {
-    return res.status(400).json({ error: 'Notes exceed maximum length of 10000 characters' });
-  }
-
-  try {
-    // Validate positionId if provided
-    let validatedPosition: { id: string; title: string; requirements: string | null } | undefined;
-    if (positionId) {
-      validatedPosition = db
-        .prepare('SELECT id, title, requirements FROM positions WHERE id = ? AND company_id = ?')
-        .get(positionId, req.user!.companyId) as { id: string; title: string; requirements: string | null } | undefined;
-      if (!validatedPosition) {
-        fs.unlinkSync(req.file.path);
-        return res.status(404).json({ error: 'Position not found' });
-      }
+  let validatedPosition: { id: string; title: string; requirements: string | null } | undefined
+  if (positionId) {
+    validatedPosition = db.prepare('SELECT id, title, requirements FROM positions WHERE id = ? AND company_id = ?')
+      .get(positionId, req.user!.companyId) as typeof validatedPosition
+    if (!validatedPosition) {
+      fs.unlinkSync(req.file.path)
+      return res.status(404).json({ error: 'Position not found' })
     }
+  }
 
-    // Extract text from PDF using pdf-parse
-    const buffer = await fs.promises.readFile(req.file.path);
-    let cvText = '';
+  const candidateId = uuidv4()
+  const now = new Date().toISOString()
+  const filePath = req.file.path
+  const fileName = req.file.originalname
+  const companyId = req.user!.companyId
+
+  db.prepare(`
+    INSERT INTO candidates (
+      id, company_id, position_id, name, email, phone, location,
+      cv_filename, cv_path, cv_text, status,
+      overall_score, experience_score, skills_score, education_score, cultural_fit_score,
+      years_experience, ai_summary, ai_strengths, ai_concerns,
+      extracted_skills, extracted_experience, extracted_education,
+      notes, is_analyzing, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, null, null, null, ?, ?, '', 'new', 0, 0, 0, 0, 0, 0,
+      'Análisis en progreso...', 'Análisis en progreso...', 'Análisis en progreso...',
+      '', '', '', ?, 1, ?, ?)
+  `).run(candidateId, companyId, positionId || null, fileName, filePath, notes || null, now, now)
+
+  const candidate = db.prepare(`
+    SELECT id, company_id, position_id, name, email, phone, location, cv_filename, status,
+           overall_score, experience_score, skills_score, education_score, cultural_fit_score,
+           years_experience, ai_summary, ai_strengths, ai_concerns, extracted_skills,
+           extracted_experience, extracted_education, notes, is_analyzing, created_at, updated_at
+    FROM candidates WHERE id = ?
+  `).get(candidateId)
+
+  res.status(201).json(candidate)
+
+  const positionTitle = validatedPosition?.title
+  const positionRequirements = validatedPosition?.requirements || undefined
+
+  setImmediate(async () => {
     try {
-      const pdfData = await pdfParse(buffer);
-      cvText = pdfData.text?.trim().slice(0, 10000) || '';
-    } catch {
-      cvText = '';
+      const buffer = await fs.promises.readFile(filePath)
+      let cvText = ''
+      try {
+        const data = new Uint8Array(buffer)
+        const doc = await (pdfjsLib as any).getDocument({ data, useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise
+        const pages: string[] = []
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i)
+          const content = await page.getTextContent()
+          pages.push(content.items.map((item: any) => ('str' in item ? item.str : '')).join(' '))
+        }
+        cvText = pages.join('\n').replace(/\s+/g, ' ').trim().slice(0, 10000)
+      } catch (err) {
+        console.error('pdfjs extraction error:', err)
+      }
+      if (!cvText || cvText.length < 50) {
+        cvText = buffer.toString('latin1').replace(/[^\x20-\x7E\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 10000)
+      }
+
+      const analysis = await analyzeCV(cvText, positionTitle, positionRequirements)
+      const updatedAt = new Date().toISOString()
+
+      db.prepare(`
+        UPDATE candidates SET
+          name=?, email=?, phone=?, location=?, cv_text=?,
+          overall_score=?, experience_score=?, skills_score=?,
+          education_score=?, cultural_fit_score=?, years_experience=?,
+          ai_summary=?, ai_strengths=?, ai_concerns=?,
+          extracted_skills=?, extracted_experience=?, extracted_education=?,
+          is_analyzing=0, updated_at=?
+        WHERE id=?
+      `).run(
+        analysis.name || fileName,
+        analysis.email || null, analysis.phone || null, analysis.location || null, cvText,
+        analysis.overall_score, analysis.experience_score, analysis.skills_score,
+        analysis.education_score, analysis.cultural_fit_score, analysis.years_experience,
+        analysis.ai_summary, analysis.ai_strengths, analysis.ai_concerns,
+        analysis.extracted_skills, analysis.extracted_experience, analysis.extracted_education,
+        updatedAt, candidateId
+      )
+    } catch (err) {
+      console.error('Background analysis error:', err)
+      db.prepare(`UPDATE candidates SET is_analyzing=0, updated_at=? WHERE id=?`)
+        .run(new Date().toISOString(), candidateId)
     }
-
-    // Check text quality: need at least 40% alphabetic chars to consider it readable
-    const alphaCount = (cvText.match(/[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]/g) || []).length;
-    const isReadable = cvText.length >= 50 && alphaCount / cvText.length >= 0.4;
-
-    if (!isReadable) {
-      // fallback: extraer texto ASCII printable del binario
-      cvText = buffer.toString('latin1')
-        .replace(/[^\x20-\x7E\n\r\t]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 10000);
-    }
-
-    // Get position info for AI analysis (reuse result from validation query above)
-    const positionTitle: string | undefined = validatedPosition?.title;
-    const positionRequirements: string | undefined = validatedPosition?.requirements || undefined;
-
-    // Analyze CV with AI
-    const analysis = await analyzeCV(cvText, positionTitle, positionRequirements);
-
-    const candidateId = uuidv4();
-    const now = new Date().toISOString();
-
-    db.prepare(`
-      INSERT INTO candidates (
-        id, company_id, position_id, name, email, phone, location,
-        cv_filename, cv_path, cv_text, status,
-        overall_score, experience_score, skills_score, education_score, cultural_fit_score,
-        years_experience, ai_summary, ai_strengths, ai_concerns,
-        extracted_skills, extracted_experience, extracted_education,
-        notes, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      candidateId,
-      req.user!.companyId,
-      positionId || null,
-      analysis.name || req.file.originalname,
-      analysis.email || null,
-      analysis.phone || null,
-      analysis.location || null,
-      req.file.originalname,
-      req.file.path,
-      cvText,
-      analysis.overall_score,
-      analysis.experience_score,
-      analysis.skills_score,
-      analysis.education_score,
-      analysis.cultural_fit_score,
-      analysis.years_experience,
-      analysis.ai_summary,
-      analysis.ai_strengths,
-      analysis.ai_concerns,
-      analysis.extracted_skills,
-      analysis.extracted_experience,
-      analysis.extracted_education,
-      notes || null,
-      now,
-      now
-    );
-
-    const candidate = db.prepare(`
-      SELECT id, company_id, position_id, name, email, phone, location, cv_filename, status,
-             overall_score, experience_score, skills_score, education_score, cultural_fit_score,
-             years_experience, ai_summary, ai_strengths, ai_concerns, extracted_skills,
-             extracted_experience, extracted_education, notes, created_at, updated_at
-      FROM candidates WHERE id = ?
-    `).get(candidateId);
-    return res.status(201).json(candidate);
-  } catch (err) {
-    console.error('Create candidate error:', err);
-    if (req.file) {
-      try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
-    }
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
+  })
+})
 
 // GET /candidates/:id/cv — must be BEFORE /:id
 router.get('/:id/cv', (req: Request, res: Response) => {
@@ -284,7 +269,7 @@ router.get('/:id', (req: Request, res: Response) => {
              c.cv_filename, c.status, c.overall_score, c.experience_score, c.skills_score,
              c.education_score, c.cultural_fit_score, c.years_experience,
              c.ai_summary, c.ai_strengths, c.ai_concerns, c.extracted_skills,
-             c.extracted_experience, c.extracted_education, c.notes,
+             c.extracted_experience, c.extracted_education, c.notes, c.is_analyzing,
              c.created_at, c.updated_at, p.title as position_title
       FROM candidates c
       LEFT JOIN positions p ON c.position_id = p.id
@@ -349,7 +334,7 @@ router.patch('/:id', (req: Request, res: Response) => {
     SELECT id, company_id, position_id, name, email, phone, location, cv_filename, status,
            overall_score, experience_score, skills_score, education_score, cultural_fit_score,
            years_experience, ai_summary, ai_strengths, ai_concerns, extracted_skills,
-           extracted_experience, extracted_education, notes, created_at, updated_at
+           extracted_experience, extracted_education, notes, is_analyzing, created_at, updated_at
     FROM candidates WHERE id = ?
   `).get(req.params.id);
   return res.json(candidate);

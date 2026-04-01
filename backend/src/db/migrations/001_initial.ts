@@ -108,5 +108,10 @@ export function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_interviews_token ON interviews(public_token);
   `);
 
+  // Add is_analyzing column if it doesn't exist
+  try {
+    db.exec(`ALTER TABLE candidates ADD COLUMN is_analyzing INTEGER NOT NULL DEFAULT 0`)
+  } catch { /* column already exists */ }
+
   console.log('Migrations ran successfully');
 }
